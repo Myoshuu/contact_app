@@ -1,15 +1,9 @@
 const express = require("express");
-const {
-  loadContact,
-  findContact,
-  addContact,
-  dupeCheck,
-  deleteContact,
-  updateContact,
-} = require("./utils/contacts");
 
 const expressLayouts = require("express-ejs-layouts");
 const { body, check, validationResult } = require("express-validator");
+const methodOverride = require("method-override");
+
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
 const flash = require("connect-flash");
@@ -22,10 +16,19 @@ app.set("view engine", "ejs");
 
 // Third party Middleware
 app.use(expressLayouts);
+app.use(express.static("public"));
+app.use(express.urlencoded({ extended: true }));
+
+require("./utils/db");
+const Contact = require("./model/contact");
+const res = require("express/lib/response");
 
 // Built-in Middleware
 app.use(express.static("public"));
 app.use(express.urlencoded({ extended: true }));
+
+// Setup method override
+app.use(methodOverride("_method"));
 
 // Flash Configuration
 app.use(cookieParser("secret"));
@@ -63,10 +66,9 @@ app.get("/about", (req, res) => {
 });
 
 // Contact Route
-app.get("/contact", (req, res) => {
+app.get("/contact", async (req, res) => {
   // res.sendFile("./contact.html", { root: __dirname });
-  const contacts = loadContact();
-
+  const contacts = await Contact.find();
   res.render("contact", {
     layout: "layouts/main_layout",
     title: "Contact",
@@ -87,8 +89,8 @@ app.get("/contact/add", (req, res) => {
 app.post(
   "/contact",
   [
-    body("nama").custom((value) => {
-      const dupe = dupeCheck(value);
+    body("nama").custom(async (value) => {
+      const dupe = await Contact.findOne({ nama: value });
       if (dupe) {
         throw new Error("Name already exist");
       }
@@ -107,34 +109,26 @@ app.post(
         errors: errors.array(),
       });
     } else {
-      addContact(req.body);
-
-      // Send flash message
-      req.flash("msg", "Data successfully added!");
-      res.redirect("/contact");
+      Contact.insertMany(req.body, (error, result) => {
+        req.flash("msg", "Data contact berhasil ditambahkan!");
+        res.redirect("/contact");
+      });
     }
   }
 );
 
 // Delete Contact
-app.get("/contact/delete/:nama", (req, res) => {
-  const contact = findContact(req.params.nama);
-
-  // If contact not exist
-  if (!contact) {
-    res.status(404);
-    res.sendFile("./404.html", { root: __dirname });
-  } else {
-    deleteContact(req.params.nama);
+app.delete("/contact", (req, res) => {
+  Contact.deleteOne({ nama: req.body.nama }).then((result) => {
     // Send flash message
-    req.flash("msg", "Data successfully deleted!");
+    req.flash("msg", "Data contact berhasil dihapus!");
     res.redirect("/contact");
-  }
+  });
 });
 
 // Edit Contact
-app.get("/contact/edit/:nama", (req, res) => {
-  const contact = findContact(req.params.nama);
+app.get("/contact/edit/:nama", async (req, res) => {
+  const contact = await Contact.findOne({ nama: req.params.nama });
 
   res.render("edit_contact", {
     layout: "layouts/main_layout",
@@ -144,11 +138,11 @@ app.get("/contact/edit/:nama", (req, res) => {
 });
 
 // Process edit Contact
-app.post(
-  "/contact/update",
+app.put(
+  "/contact",
   [
-    body("nama").custom((value, { req }) => {
-      const dupe = dupeCheck(value);
+    body("nama").custom(async (value, { req }) => {
+      const dupe = await Contact.findOne({ nama: value });
       if (value !== req.body.oldNama && dupe) {
         throw new Error("Name already exist");
       }
@@ -168,19 +162,30 @@ app.post(
         contact: req.body,
       });
     } else {
-      updateContact(req.body);
-
-      // Send flash message
-      req.flash("msg", "Data successfully updated!");
-      res.redirect("/contact");
+      Contact.updateOne(
+        {
+          _id: req.body._id,
+        },
+        {
+          $set: {
+            nama: req.body.nama,
+            email: req.body.email,
+            nohp: req.body.nohp,
+          },
+        }
+      ).then((result) => {
+        // Send flash message
+        req.flash("msg", "Data successfully updated!");
+        res.redirect("/contact");
+      });
     }
   }
 );
 
 // Details Contact
-app.get("/contact/:nama", (req, res) => {
+app.get("/contact/:nama", async (req, res) => {
   // res.sendFile("./contact.html", { root: __dirname });
-  const contact = findContact(req.params.nama);
+  const contact = await Contact.findOne({ nama: req.params.nama });
 
   res.render("detailContact", {
     layout: "layouts/main_layout",
@@ -195,5 +200,6 @@ app.use((req, res) => {
   res.sendFile("./404.html", { root: __dirname });
 });
 
-app.listen(port);
-console.log(`listening to http://localhost:${port}`);
+app.listen(port, () => {
+  console.log(`Mongo Contact App | listening at http://localhost:${port}`);
+});
